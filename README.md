@@ -8,6 +8,8 @@
 
 <p align="center"><b>Runs anywhere Python 3.8+ runs:</b> Linux, Windows, macOS, and Termux (Android) — standard library only, no <code>pip install</code> required.</p>
 
+<p align="center"><b>Version:</b> 1.1.0 &nbsp;·&nbsp; <a href="#version-history">Version History</a></p>
+
 ---
 
 ## Why EvidenceVault
@@ -21,10 +23,10 @@ Investigators routinely need to encode large batches of evidence for transport/r
 | **Multi-codec encoding** | Base64, Base64-URL-safe, Base32, Base16 (hex), Base85, ASCII85, and percent/URL-encoding |
 | **Batch & parallel** | Encode/decode single files, whole folders, or nested trees, in parallel across CPU cores |
 | **Image-safe** | Operates on raw bytes — works identically on `.jpg`, `.png`, `.pdf`, `.bin`, anything |
-| **One-file vaults** | `bundle` compiles an entire folder into a single portable `.vault.json` — manifest + hashes + encoded payloads together |
-| **Integrity built-in** | Every bundled file gets a SHA-256 hash recorded and re-checked on `verify`/`extract` |
-| **Optional compression** | `--compress` shrinks payloads with zlib before encoding — smaller vaults, faster transfer |
-| **Chain-of-custody hashing** | `hash` generates a SHA-256(+MD5) manifest of a folder as CSV or JSON |
+| **One-file vaults** | `bundle` compiles an entire folder into a single portable vault — JSON (text-encoded, readable) or ZIP (raw + compressed, smaller — recommended for large cases) |
+| **Integrity built-in** | Every bundled file gets a hash (SHA-256 by default, or BLAKE2b/BLAKE2s/SHA-1/MD5) recorded and re-checked on `verify`/`extract` |
+| **Optional compression** | `--compress` shrinks JSON-vault payloads with zlib before encoding; the ZIP vault format is always natively compressed |
+| **Chain-of-custody hashing** | `hash` generates a hash manifest (SHA-256 by default, BLAKE2b/BLAKE2s/SHA-1 also available, plus optional MD5) as CSV or JSON |
 | **Safe batch rename** | Template-driven renaming (`{name} {ext} {n} {hash} {date} {time} {parent}`) with cross-platform filename sanitization, collision handling, `--dry-run`, and a full original→renamed audit CSV |
 | **Folder renaming** | Renames subfolders too (deepest-first, so paths never break mid-operation) |
 | **Auto-sort** | Organizes a folder's contents into subfolders by extension, type (images/documents/archives/…), modification date, or detected encoding |
@@ -60,11 +62,15 @@ python3 evidencevault.py decode ./encoded -r -o ./restored
 python3 evidencevault.py bundle ./case_files -e base64 -r --compress \
     --case "CASE-2026-0091" -o case_0091.vault.json
 
-# Check every hash inside a vault without extracting anything
-python3 evidencevault.py verify case_0091.vault.json
+# Big case? Use the ZIP vault instead — much smaller than JSON, still hash-verified
+python3 evidencevault.py bundle ./case_files -r --format zip \
+    --case "CASE-2026-0091" -o case_0091.vault.zip
+
+# Check every hash inside a vault without extracting anything (works for both formats)
+python3 evidencevault.py verify case_0091.vault.zip
 
 # Restore a vault to disk (re-verifies each hash as it writes)
-python3 evidencevault.py extract case_0091.vault.json -o ./restored_case
+python3 evidencevault.py extract case_0091.vault.zip -o ./restored_case
 
 # Chain-of-custody manifest (SHA-256 + MD5) for a folder
 python3 evidencevault.py hash ./case_files -r --md5 -o manifest.csv
@@ -91,17 +97,26 @@ Each input file becomes one output file with the codec's extension appended (e.g
 
 ### `bundle` / `extract` / `verify`
 ```
-evidencevault.py bundle PATH... -o OUT.vault.json [-e ENCODING] [-r] [--compress] [--case NAME] [--minify]
-evidencevault.py extract VAULT.vault.json -o OUTPUT_DIR [--force]
-evidencevault.py verify  VAULT.vault.json
+evidencevault.py bundle PATH... -o OUTPUT [--format {json,zip}] [-e ENCODING] [-r]
+                                 [--compress] [--hash-algo {sha256,blake2b,blake2s,sha1,md5}]
+                                 [--case NAME] [--minify] [--workers N]
+evidencevault.py extract VAULT -o OUTPUT_DIR [--force]
+evidencevault.py verify  VAULT
 ```
-A vault is a single JSON file containing a manifest (relative path, codec, SHA-256, size, mtime) and the encoded payload for every input file. `extract` re-checks each hash while writing; `--force` writes anyway on a mismatch (and still reports it). `verify` checks everything with zero disk writes.
+A vault compiles a whole case into one portable file, in either of two containers:
+
+- **`--format json`** (default) — a single `.vault.json` with a manifest (relative path, codec, hash, size, mtime) and the text-encoded payload for every file, inline. Human-readable and diffable, but text encoding inflates size (Base64 alone adds ~33%).
+- **`--format zip`** — a real `.vault.zip` holding each file's raw bytes (natively DEFLATE-compressed) plus a `manifest.json` entry with the same hash/size/mtime metadata. No text-encoding overhead, so it's noticeably smaller — **use this for large cases**. `--encoding`/`--compress` are ignored in this mode (zip already compresses).
+
+Both containers are hashed per file with `--hash-algo` (default `sha256`; `blake2b`, `blake2s`, and `sha1` are also available — see the note on hashing below) and both work transparently with `extract`/`verify`, which auto-detect the container. `extract` re-checks each hash while writing; `--force` writes anyway on a mismatch (and still reports it). `verify` checks everything with zero disk writes. Vaults created by earlier EvidenceVault versions (plain SHA-256 `.vault.json`) still verify/extract correctly.
+
+**On hash algorithm choice:** SHA-256 stays the default because it's the most widely recognized standard in forensic/legal reporting. BLAKE2b/BLAKE2s are offered as alternatives, but whether they're actually *faster* than SHA-256 depends on your CPU — modern x86-64 chips with SHA hardware extensions (which OpenSSL uses for SHA-256/SHA-1, not for BLAKE2) can make SHA-256 outrun BLAKE2b by 2x or more. Benchmark on your own hardware before switching for speed; on hardware without SHA extensions (some ARM/older devices), BLAKE2 tends to come out ahead.
 
 ### `hash`
 ```
-evidencevault.py hash PATH... [-r] [--md5] [-o manifest.csv|manifest.json]
+evidencevault.py hash PATH... [-r] [--algo {sha256,blake2b,blake2s,sha1,md5}] [--md5] [-o manifest.csv|manifest.json]
 ```
-Streams every file through SHA-256 (optionally MD5 too) for a defensible integrity manifest. Omit `-o` to print `sha256  path` pairs to stdout.
+Streams every file through the chosen `--algo` (default SHA-256; optionally MD5 too, regardless of `--algo`) for a defensible integrity manifest. Omit `-o` to print `hash  path` pairs to stdout.
 
 ### `rename`
 ```
@@ -136,6 +151,16 @@ Every run prints a cyberpunk/retro-terminal vault banner (ANSI-colored ASCII art
 - **Streaming hashes** — `hash_file()` reads in 1 MB chunks, so multi-gigabyte evidence images don't get loaded into memory whole.
 - **Safety-first rename** — dry-run by default mindset, collision detection, and an optional CSV audit trail mapping every original path to its new name, so nothing is ever renamed without a paper trail.
 - **Exit codes** — `0` success, `1` bad input/no files, `2` partial batch failure, `3` hash mismatch (verify/extract), `130` interrupted.
+
+## Version History
+
+### 1.1.0
+- Added `bundle --format zip` — a size-optimized vault container (raw bytes + native DEFLATE compression + a `manifest.json` entry), alongside the original `json` format. Recommended for large cases; `extract`/`verify` auto-detect either container.
+- Added `--hash-algo`/`--algo` (`sha256` default, plus `blake2b`, `blake2s`, `sha1`, `md5`) to `bundle` and `hash`, so integrity hashing isn't locked to SHA-256.
+- Vaults from 1.0.0 (plain SHA-256 `.vault.json`, no `hash_algo` field) remain fully compatible with `verify`/`extract`.
+
+### 1.0.0
+- Initial release: multi-codec `encode`/`decode` (Base64/32/16/85, ASCII85, URL-encoding), JSON `bundle`/`extract`/`verify` vaults with SHA-256 integrity, `hash` chain-of-custody manifests, template-driven `rename` with audit trail, `sort` by extension/category/date/encoding, and the cyberpunk/retro-terminal startup banner.
 
 ## License
 
