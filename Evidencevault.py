@@ -19,10 +19,20 @@ USAGE EXAMPLES
     python3 evidencevault.py bundle ./case_files -e base64 -r --compress \
         --case "CASE-2026-0091" -o case_0091.vault.json
 
-    # Verify a vault's integrity without extracting anything
+    # Large case? Use the ZIP container instead -- raw + natively compressed,
+    # much smaller than the text-encoded JSON vault
+    python3 evidencevault.py bundle ./case_files -r --format zip \
+        --case "CASE-2026-0091" -o case_0091.vault.zip
+
+    # Want BLAKE2b instead of the SHA-256 default? (speed vs SHA-256 depends on
+    # whether your CPU has SHA hardware extensions -- benchmark first)
+    python3 evidencevault.py bundle ./case_files -r --format zip --hash-algo blake2b \
+        --case "CASE-2026-0091" -o case_0091.vault.zip
+
+    # Verify a vault's integrity without extracting anything (works for both containers)
     python3 evidencevault.py verify case_0091.vault.json
 
-    # Extract a vault back to disk, re-checking every SHA-256 hash on the way out
+    # Extract a vault back to disk, re-checking every hash on the way out
     python3 evidencevault.py extract case_0091.vault.json -o ./restored_case
 
     # Generate a chain-of-custody hash manifest (SHA-256 + MD5) for a folder
@@ -62,6 +72,7 @@ import re
 import shutil
 import sys
 import time
+import zipfile
 import zlib
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
@@ -69,8 +80,9 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import quote_from_bytes, unquote_to_bytes
 
-VERSION = "1.0.0"
-VAULT_FORMAT_VERSION = "1.0"
+VERSION = "1.1.0"
+VAULT_FORMAT_VERSION = "1.1"
+HASH_ALGOS = ["sha256", "blake2b", "blake2s", "sha1", "md5"]
 
 # --------------------------------------------------------------------------- #
 # Encoding registry -- add a new codec here and every subcommand picks it up
@@ -428,19 +440,19 @@ class VaultEntry:
     path: str          # posix-style relative path, preserved for reconstruction
     encoding: str
     compressed: bool
-    sha256: str
+    hash: str
     size: int
     mtime: str
     data: str          # the encoded payload itself
 
 
-def _bundle_one(args: Tuple[str, str, str, bool]) -> Tuple[str, Optional[dict], Optional[str]]:
-    """Worker: (abs_path, rel_path, encoding, compress) -> (abs_path, entry_dict|None, error|None)."""
-    abs_str, rel_str, encoding, compress = args
+def _bundle_one(args: Tuple[str, str, str, bool, str]) -> Tuple[str, Optional[dict], Optional[str]]:
+    """Worker: (abs_path, rel_path, encoding, compress, hash_algo) -> (abs_path, entry_dict|None, error|None)."""
+    abs_str, rel_str, encoding, compress, hash_algo = args
     p = Path(abs_str)
     try:
         raw = p.read_bytes()
-        digest = hashlib.sha256(raw).hexdigest()
+        digest = hashlib.new(hash_algo, raw).hexdigest()
         stat = p.stat()
         payload = zlib.compress(raw, level=9) if compress else raw
         encoded = ENCODINGS[encoding]["encode"](payload).decode("ascii")
@@ -448,7 +460,7 @@ def _bundle_one(args: Tuple[str, str, str, bool]) -> Tuple[str, Optional[dict], 
             path=rel_str,
             encoding=encoding,
             compressed=compress,
-            sha256=digest,
+            hash=digest,
             size=len(raw),
             mtime=datetime.fromtimestamp(stat.st_mtime).isoformat(),
             data=encoded,
@@ -458,19 +470,18 @@ def _bundle_one(args: Tuple[str, str, str, bool]) -> Tuple[str, Optional[dict], 
         return (abs_str, None, str(exc))
 
 
-def cmd_bundle(args: argparse.Namespace) -> int:
-    files = iter_input_files(args.paths, args.recursive)
-    if not files:
-        log.error("No input files found.")
-        return 1
-
+def _bundle_json(args: argparse.Namespace, files: List[Path]) -> int:
+    """Original vault format: one JSON file holding hashes + text-encoded payloads.
+    Human-readable and diff-friendly, but text encoding inflates size by ~33%+ --
+    prefer --format zip for large cases."""
     root = Path(args.paths[0]) if len(args.paths) == 1 and Path(args.paths[0]).is_dir() else None
     tasks = []
     for f in files:
         rel = f.relative_to(root).as_posix() if root else f.name
-        tasks.append((str(f), rel, args.encoding, args.compress))
+        tasks.append((str(f), rel, args.encoding, args.compress, args.hash_algo))
 
-    log.info("Bundling %d file(s) into vault (%s, compress=%s)", len(tasks), args.encoding, args.compress)
+    log.info("Bundling %d file(s) into JSON vault (%s, hash=%s, compress=%s)",
+              len(tasks), args.encoding, args.hash_algo, args.compress)
     entries: List[dict] = []
     fail_count = 0
     with Timer() as t, concurrent.futures.ProcessPoolExecutor(max_workers=args.workers) as pool:
@@ -483,10 +494,12 @@ def cmd_bundle(args: argparse.Namespace) -> int:
 
     vault = {
         "vault_format": VAULT_FORMAT_VERSION,
+        "container": "json",
         "tool": "EvidenceVault",
         "tool_version": VERSION,
         "created_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "case_name": args.case,
+        "hash_algo": args.hash_algo,
         "file_count": len(entries),
         "total_raw_bytes": sum(e["size"] for e in entries),
         "files": sorted(entries, key=lambda e: e["path"]),
@@ -497,62 +510,159 @@ def cmd_bundle(args: argparse.Namespace) -> int:
     with open(out_path, "w", encoding="utf-8") as fh:
         json.dump(vault, fh, indent=None if args.minify else 2)
 
+    out_size = out_path.stat().st_size
     log.info(
-        "Vault written: %s (%d files, %d failed, %s raw -> %.2fs)",
-        out_path, len(entries), fail_count, human_size(vault["total_raw_bytes"]), t.elapsed,
+        "Vault written: %s (%d files, %d failed, %s raw -> %s on disk, %.2fs)",
+        out_path, len(entries), fail_count, human_size(vault["total_raw_bytes"]), human_size(out_size), t.elapsed,
     )
     return 0 if fail_count == 0 else 2
 
 
-def _load_vault(path: str) -> dict:
+def _bundle_zip(args: argparse.Namespace, files: List[Path]) -> int:
+    """Size-optimized vault: a real .zip holding raw (natively-compressed) files
+    plus a manifest.json entry with per-file hashes. No text encoding overhead --
+    the right choice for large cases."""
+    root = Path(args.paths[0]) if len(args.paths) == 1 and Path(args.paths[0]).is_dir() else None
+    entries: List[dict] = []
+    fail_count = 0
+    out_path = Path(args.output)
+    ensure_parent(out_path)
+
+    with Timer() as t, zipfile.ZipFile(out_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
+        for f in files:
+            rel = f.relative_to(root).as_posix() if root else f.name
+            try:
+                stat = f.stat()
+                digest = hash_file(f, args.hash_algo)
+                zf.write(f, arcname=f"files/{rel}")
+                entries.append({
+                    "path": rel,
+                    "hash": digest,
+                    "size": stat.st_size,
+                    "mtime": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                })
+            except Exception as exc:  # noqa: BLE001
+                fail_count += 1
+                log.error("FAIL %s: %s", f, exc)
+
+        manifest = {
+            "vault_format": VAULT_FORMAT_VERSION,
+            "container": "zip",
+            "tool": "EvidenceVault",
+            "tool_version": VERSION,
+            "created_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "case_name": args.case,
+            "hash_algo": args.hash_algo,
+            "file_count": len(entries),
+            "total_raw_bytes": sum(e["size"] for e in entries),
+            "files": sorted(entries, key=lambda e: e["path"]),
+        }
+        zf.writestr("manifest.json", json.dumps(manifest, indent=None if args.minify else 2))
+
+    out_size = out_path.stat().st_size
+    log.info(
+        "Vault written: %s (%d files, %d failed, %s raw -> %s on disk, %.2fs)",
+        out_path, len(entries), fail_count, human_size(manifest["total_raw_bytes"]), human_size(out_size), t.elapsed,
+    )
+    return 0 if fail_count == 0 else 2
+
+
+def cmd_bundle(args: argparse.Namespace) -> int:
+    files = iter_input_files(args.paths, args.recursive)
+    if not files:
+        log.error("No input files found.")
+        return 1
+    if args.format == "zip":
+        return _bundle_zip(args, files)
+    return _bundle_json(args, files)
+
+
+def _load_vault(path: str) -> Tuple[dict, str]:
+    """Load a vault regardless of container. Returns (manifest_dict, container) where
+    container is 'json' or 'zip'. For 'zip', per-file bytes are read on demand via
+    _read_zip_entry() since they aren't embedded as text in the manifest."""
+    if zipfile.is_zipfile(path):
+        with zipfile.ZipFile(path) as zf:
+            manifest = json.loads(zf.read("manifest.json"))
+        return manifest, "zip"
     with open(path, "r", encoding="utf-8") as fh:
-        return json.load(fh)
+        return json.load(fh), "json"
+
+
+def _entry_hash(entry: dict) -> str:
+    """Support both the current 'hash' field and the original 'sha256' field
+    written by EvidenceVault < 1.1, so old vaults still verify/extract cleanly."""
+    return entry.get("hash", entry.get("sha256", ""))
 
 
 def cmd_verify(args: argparse.Namespace) -> int:
-    vault = _load_vault(args.vault_file)
+    manifest, container = _load_vault(args.vault_file)
+    algo = manifest.get("hash_algo", "sha256")
     mismatches = 0
-    for entry in vault.get("files", []):
-        try:
-            payload = ENCODINGS[entry["encoding"]]["decode"](entry["data"].encode("ascii"))
-            if entry.get("compressed"):
-                payload = zlib.decompress(payload)
-            actual = hashlib.sha256(payload).hexdigest()
-            if actual != entry["sha256"]:
-                mismatches += 1
-                log.error("MISMATCH %s (expected %s, got %s)", entry["path"], entry["sha256"], actual)
-            else:
-                log.debug("OK %s", entry["path"])
-        except Exception as exc:  # noqa: BLE001
-            mismatches += 1
-            log.error("ERROR verifying %s: %s", entry["path"], exc)
+    entries = manifest.get("files", [])
 
-    total = len(vault.get("files", []))
+    zf = zipfile.ZipFile(args.vault_file) if container == "zip" else None
+    try:
+        for entry in entries:
+            try:
+                if container == "zip":
+                    payload = zf.read(f"files/{entry['path']}")
+                else:
+                    payload = ENCODINGS[entry["encoding"]]["decode"](entry["data"].encode("ascii"))
+                    if entry.get("compressed"):
+                        payload = zlib.decompress(payload)
+                actual = hashlib.new(algo, payload).hexdigest()
+                expected = _entry_hash(entry)
+                if actual != expected:
+                    mismatches += 1
+                    log.error("MISMATCH %s (expected %s, got %s)", entry["path"], expected, actual)
+                else:
+                    log.debug("OK %s", entry["path"])
+            except Exception as exc:  # noqa: BLE001
+                mismatches += 1
+                log.error("ERROR verifying %s: %s", entry["path"], exc)
+    finally:
+        if zf:
+            zf.close()
+
+    total = len(entries)
     log.info("Verified %d/%d files OK (%d mismatch/error)", total - mismatches, total, mismatches)
     return 0 if mismatches == 0 else 3
 
 
 def cmd_extract(args: argparse.Namespace) -> int:
-    vault = _load_vault(args.vault_file)
+    manifest, container = _load_vault(args.vault_file)
+    algo = manifest.get("hash_algo", "sha256")
     out_root = Path(args.output)
     ok_count, mismatches = 0, 0
-    for entry in vault.get("files", []):
-        try:
-            payload = ENCODINGS[entry["encoding"]]["decode"](entry["data"].encode("ascii"))
-            if entry.get("compressed"):
-                payload = zlib.decompress(payload)
-            actual = hashlib.sha256(payload).hexdigest()
-            if actual != entry["sha256"]:
-                mismatches += 1
-                log.error("HASH MISMATCH on extract: %s", entry["path"])
-                if not args.force:
-                    continue
-            dest = out_root / entry["path"]
-            ensure_parent(dest)
-            dest.write_bytes(payload)
-            ok_count += 1
-        except Exception as exc:  # noqa: BLE001
-            log.error("FAIL extracting %s: %s", entry["path"], exc)
+    entries = manifest.get("files", [])
+
+    zf = zipfile.ZipFile(args.vault_file) if container == "zip" else None
+    try:
+        for entry in entries:
+            try:
+                if container == "zip":
+                    payload = zf.read(f"files/{entry['path']}")
+                else:
+                    payload = ENCODINGS[entry["encoding"]]["decode"](entry["data"].encode("ascii"))
+                    if entry.get("compressed"):
+                        payload = zlib.decompress(payload)
+                actual = hashlib.new(algo, payload).hexdigest()
+                expected = _entry_hash(entry)
+                if actual != expected:
+                    mismatches += 1
+                    log.error("HASH MISMATCH on extract: %s", entry["path"])
+                    if not args.force:
+                        continue
+                dest = out_root / entry["path"]
+                ensure_parent(dest)
+                dest.write_bytes(payload)
+                ok_count += 1
+            except Exception as exc:  # noqa: BLE001
+                log.error("FAIL extracting %s: %s", entry["path"], exc)
+    finally:
+        if zf:
+            zf.close()
 
     log.info("Extracted %d file(s) to %s (%d hash mismatches)", ok_count, out_root, mismatches)
     return 0 if mismatches == 0 else 3
@@ -577,8 +687,8 @@ def cmd_hash(args: argparse.Namespace) -> int:
                 "path": str(f),
                 "size_bytes": stat.st_size,
                 "modified_utc": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat().replace("+00:00", "Z"),
-                "sha256": hash_file(f, "sha256"),
-                "md5": hash_file(f, "md5") if args.md5 else "",
+                args.algo: hash_file(f, args.algo),
+                "md5": hash_file(f, "md5") if (args.md5 and args.algo != "md5") else "",
             })
 
     if args.output:
@@ -589,6 +699,7 @@ def cmd_hash(args: argparse.Namespace) -> int:
                 json.dump({
                     "generated_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                     "tool": "EvidenceVault",
+                    "hash_algo": args.algo,
                     "file_count": len(rows),
                     "files": rows,
                 }, fh, indent=2)
@@ -600,7 +711,7 @@ def cmd_hash(args: argparse.Namespace) -> int:
         log.info("Manifest written: %s (%d files, %.2fs)", out_path, len(rows), t.elapsed)
     else:
         for r in rows:
-            print(f"{r['sha256']}  {r['path']}")
+            print(f"{r[args.algo]}  {r['path']}")
 
     return 0
 
@@ -825,15 +936,26 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_decode)
 
     # bundle
-    p = sub.add_parser("bundle", help="Compile files/folders into ONE encoded vault file")
+    p = sub.add_parser("bundle", help="Compile files/folders into ONE vault file (JSON or ZIP container)")
     p.add_argument("paths", nargs="+", help="File(s) and/or folder(s) to bundle")
-    p.add_argument("-e", "--encoding", choices=enc_choices, default="base64")
+    p.add_argument("--format", choices=["json", "zip"], default="json",
+                   help="json: portable, human-readable, text-encoded (larger). "
+                        "zip: raw + natively compressed (smaller) -- recommended for big cases")
+    p.add_argument("-e", "--encoding", choices=enc_choices, default="base64",
+                   help="Text codec for --format json (ignored for --format zip)")
     p.add_argument("-r", "--recursive", action="store_true")
-    p.add_argument("-o", "--output", required=True, help="Output vault file, e.g. case.vault.json")
-    p.add_argument("--compress", action="store_true", help="zlib-compress each file before encoding")
+    p.add_argument("-o", "--output", required=True,
+                   help="Output vault file, e.g. case.vault.json or case.vault.zip")
+    p.add_argument("--compress", action="store_true",
+                   help="zlib-compress each file before encoding (--format json only; "
+                        "--format zip is already compressed via DEFLATE)")
+    p.add_argument("--hash-algo", dest="hash_algo", choices=HASH_ALGOS, default="sha256",
+                   help="Integrity hash per file (default sha256, the evidentiary standard). "
+                        "blake2b/blake2s are also offered -- whether they're faster than sha256 "
+                        "depends on your CPU's SHA extensions, so benchmark on your own hardware")
     p.add_argument("--case", default=None, help="Case name/ID stored in the vault metadata")
     p.add_argument("--minify", action="store_true", help="Write compact JSON (smaller file, less readable)")
-    p.add_argument("--workers", type=int, default=os.cpu_count() or 4)
+    p.add_argument("--workers", type=int, default=os.cpu_count() or 4, help="--format json only")
     _add_common(p)
     p.set_defaults(func=cmd_bundle)
 
@@ -852,11 +974,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_verify)
 
     # hash
-    p = sub.add_parser("hash", help="Generate a chain-of-custody hash manifest (SHA-256 [+MD5])")
+    p = sub.add_parser("hash", help="Generate a chain-of-custody hash manifest")
     p.add_argument("paths", nargs="+")
     p.add_argument("-r", "--recursive", action="store_true")
     p.add_argument("-o", "--output", help="Write manifest as .csv or .json (default: print to stdout)")
-    p.add_argument("--md5", action="store_true", help="Also compute MD5 (in addition to SHA-256)")
+    p.add_argument("--algo", choices=HASH_ALGOS, default="sha256",
+                   help="Primary hash algorithm (default sha256). blake2b/blake2s also "
+                        "available -- speed vs sha256 depends on your CPU's SHA extensions")
+    p.add_argument("--md5", action="store_true", help="Also compute MD5 (in addition to --algo)")
     _add_common(p)
     p.set_defaults(func=cmd_hash)
 
