@@ -46,6 +46,6 @@ jobs:
         shell: pwsh
         run: ./tests/test_windows_install.ps1
       - name: Check a complete repository download
-        if: github.event_name == 'push' && github.repository == '0xb0rn3/EvidenceVAULT'
+        if: github.event_name == 'push' && github.repository == 'DezTheJackal/EvidenceVAULT'
         shell: pwsh
         run: ./tests/test_windows_install.ps1 -NetworkSource
