@@ -1,0 +1,4 @@
+Training sample.
+These files do not contain real evidence.
+Case: SCHOOL-DEMO-01
+Task: Package the files and check their hashes.

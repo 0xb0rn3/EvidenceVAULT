@@ -1,167 +1,396 @@
 <p align="center">
-  <img src="logo.svg" alt="EvidenceVault logo" width="280">
+  <img src="logo.svg" alt="EvidenceVault logo" width="240">
 </p>
 
-<h1 align="center">EvidenceVault</h1>
+# EvidenceVault
 
-<p align="center"><i>Fast, offline, zero-dependency batch encoding, bundling, renaming, and sorting for files, folders, and images — built for cyber-crime intelligence, DFIR, and OSINT workflows.</i></p>
+**Version 1.1.1**
 
-<p align="center"><b>Runs anywhere Python 3.8+ runs:</b> Linux, Windows, macOS, and Termux (Android) — standard library only, no <code>pip install</code> required.</p>
+EvidenceVault helps an operator package, check, and organize local case files.
+It uses Python and the standard library.
+The file commands need no runtime packages and do not use the network.
 
-<p align="center"><b>Version:</b> 1.1.0 &nbsp;·&nbsp; <a href="#version-history">Version History</a></p>
+Use it for working copies of incident response files, investigation notes, screenshots, and other collected material.
+Keep the original evidence and separate collection records.
 
----
+## Start with the guided menu
 
-## Why EvidenceVault
+Get the full repository.
+The program now uses small modules. Do not copy only the launcher file.
 
-Investigators routinely need to encode large batches of evidence for transport/reporting, package a whole case folder into one self-contained artifact, rename messy dumps into a consistent evidence-naming scheme, and keep a defensible hash trail of everything they touch. EvidenceVault does all of that from one lightweight script, in parallel, with an audit trail.
+~~~bash
+git clone https://github.com/0xb0rn3/EvidenceVAULT.git
+cd EvidenceVAULT
+python3 Evidencevault.py
+~~~
 
-## Features
+On Windows, use python instead of python3.
+On Termux, install Python with pkg install python.
 
-| Category | What it does |
+The menu asks for the source, output, case name, and operator name.
+You do not need to remember the command sequence.
+Rename and sort actions show their file plan before you start.
+All ten main file operations are available in the menu.
+
+You can also start the package as a module:
+
+~~~bash
+python3 -m evidencevault
+~~~
+
+If input is not a terminal, the program shows help instead of an input prompt.
+
+## Install on Windows with PowerShell
+
+Run this command in PowerShell on Windows 10 or Windows 11:
+
+~~~powershell
+irm https://raw.githubusercontent.com/0xb0rn3/EvidenceVAULT/main/install-windows.ps1 | iex
+evidencevault
+~~~
+
+The installer downloads the complete main branch over HTTPS.
+It reuses Python 3.11 or a newer version when available.
+Otherwise, it installs Python 3.13 for the current user with WinGet.
+If WinGet is unavailable or fails, it uses the Python 3.13.15 installer from python.org.
+It checks that installer's SHA-256 value before it starts the installer.
+
+The default folder is %LOCALAPPDATA%\EvidenceVault.
+The installer creates a separate .venv environment and a bin\evidencevault.cmd command.
+It adds the bin folder to the user PATH and the current terminal PATH.
+It does not require a Git installation.
+An existing install folder is not replaced.
+
+To select a new install folder, download and run the script:
+
+~~~powershell
+irm https://raw.githubusercontent.com/0xb0rn3/EvidenceVAULT/main/install-windows.ps1 -OutFile install-windows.ps1
+& .\install-windows.ps1 -InstallDir "$env:LOCALAPPDATA\EvidenceVault-1.1.1"
+~~~
+
+The script supports PowerShell 5.1 and PowerShell 7.
+Use -Revision with a full commit hash to select an exact source version.
+If a later terminal cannot find evidencevault, open a new terminal.
+
+## Prepare a case in one command
+
+A hash is a value calculated from file contents.
+A manifest lists file paths, sizes, hashes, and recorded times.
+
+~~~bash
+python3 Evidencevault.py collect ./case_files \
+  -o ./case_output --case CASE-2026-0091 --operator "Your name"
+~~~
+
+This command includes subfolders.
+It creates these files:
+
+| File | Purpose |
 |---|---|
-| **Multi-codec encoding** | Base64, Base64-URL-safe, Base32, Base16 (hex), Base85, ASCII85, and percent/URL-encoding |
-| **Batch & parallel** | Encode/decode single files, whole folders, or nested trees, in parallel across CPU cores |
-| **Image-safe** | Operates on raw bytes — works identically on `.jpg`, `.png`, `.pdf`, `.bin`, anything |
-| **One-file vaults** | `bundle` compiles an entire folder into a single portable vault — JSON (text-encoded, readable) or ZIP (raw + compressed, smaller — recommended for large cases) |
-| **Integrity built-in** | Every bundled file gets a hash (SHA-256 by default, or BLAKE2b/BLAKE2s/SHA-1/MD5) recorded and re-checked on `verify`/`extract` |
-| **Optional compression** | `--compress` shrinks JSON-vault payloads with zlib before encoding; the ZIP vault format is always natively compressed |
-| **Chain-of-custody hashing** | `hash` generates a hash manifest (SHA-256 by default, BLAKE2b/BLAKE2s/SHA-1 also available, plus optional MD5) as CSV or JSON |
-| **Safe batch rename** | Template-driven renaming (`{name} {ext} {n} {hash} {date} {time} {parent}`) with cross-platform filename sanitization, collision handling, `--dry-run`, and a full original→renamed audit CSV |
-| **Folder renaming** | Renames subfolders too (deepest-first, so paths never break mid-operation) |
-| **Auto-sort** | Organizes a folder's contents into subfolders by extension, type (images/documents/archives/…), modification date, or detected encoding |
-| **No telemetry, no network calls** | Everything runs locally against local files |
+| case.vault.zip | Source file contents and their hash manifest. |
+| manifest.json | A separate file inventory. |
+| audit.sqlite3 | Run details, file results, and operation records. |
+| report.html | A local HTML report with file results and repeated hash groups. |
 
-## Installation
+The command checks the finished archive before it records a successful case.
+Select a new output folder for each case package.
 
-No installation needed — it's a single file.
+## Check and restore a case
 
-```bash
-git clone <this-repo> evidencevault   # or just copy evidencevault.py
-cd evidencevault
-chmod +x evidencevault.py
-python3 evidencevault.py --help
-```
+~~~bash
+python3 Evidencevault.py verify ./case_output/case.vault.zip
+python3 Evidencevault.py extract ./case_output/case.vault.zip -o ./restored_files
+~~~
 
-**Termux:**
-```bash
-pkg install python
-python evidencevault.py --help
-```
+The program checks manifest paths, file counts, sizes, and hashes.
+It rejects an unsafe path or a destination collision before it writes a restored file.
+It never replaces an existing output file.
 
-## Quick Start
+A file with a wrong hash or size does not become a finished output file.
+Other valid files can complete. A partial result has a nonzero exit code.
 
-```bash
-# Encode every file under ./case_files (recursively) to Base64, 8 workers in parallel
-python3 evidencevault.py encode ./case_files -e base64 -r -o ./encoded --workers 8
+## Main commands
 
-# Decode it back (auto-detects codec from the .b64/.b32/.hex/... extension)
-python3 evidencevault.py decode ./encoded -r -o ./restored
+| Command | Result |
+|---|---|
+| collect | A checked ZIP case package, inventory, audit database, and HTML report. |
+| bundle | A ZIP or JSON case archive. |
+| verify | A check of archive structure, file hashes, and file sizes. |
+| extract | Checked files in new output paths. |
+| hash | A file inventory in JSON or CSV, or hash lines in the terminal. |
+| encode | Encoded working copies. |
+| decode | Decoded working copies. |
+| rename | Working copies with consistent names. |
+| sort | Working copies in category, extension, date, or encoding folders. |
+| report | An HTML report from an archive or a saved database run. |
+| wizard | The guided operator menu. |
 
-# Compile a whole case folder into ONE hash-verified, compressed vault file
-python3 evidencevault.py bundle ./case_files -e base64 -r --compress \
-    --case "CASE-2026-0091" -o case_0091.vault.json
+Use command help for all options:
 
-# Big case? Use the ZIP vault instead — much smaller than JSON, still hash-verified
-python3 evidencevault.py bundle ./case_files -r --format zip \
-    --case "CASE-2026-0091" -o case_0091.vault.zip
+~~~bash
+python3 Evidencevault.py --help
+python3 Evidencevault.py collect --help
+python3 Evidencevault.py rename --help
+~~~
 
-# Check every hash inside a vault without extracting anything (works for both formats)
-python3 evidencevault.py verify case_0091.vault.zip
+## Use archives and file inventories
 
-# Restore a vault to disk (re-verifies each hash as it writes)
-python3 evidencevault.py extract case_0091.vault.zip -o ./restored_case
+ZIP is the default archive format.
+It stores raw file bytes with compression.
+The writer hashes the same bytes that enter the archive.
 
-# Chain-of-custody manifest (SHA-256 + MD5) for a folder
-python3 evidencevault.py hash ./case_files -r --md5 -o manifest.csv
+JSON is available for small, text-based transfers.
+Its encoded payloads use more space.
 
-# Batch-rename a messy dump into a consistent evidence scheme (preview first!)
-python3 evidencevault.py rename ./messy_dump -r \
-    --pattern "EVID_{date}_{n:04d}_{hash}{ext}" --dry-run
-python3 evidencevault.py rename ./messy_dump -r \
-    --pattern "EVID_{date}_{n:04d}_{hash}{ext}" --audit-log rename_log.csv
+~~~bash
+python3 Evidencevault.py bundle ./case_files -r -o ./case.vault.zip
+python3 Evidencevault.py bundle ./case_files -r --format json --compress -o ./case.vault.json
+python3 Evidencevault.py hash ./case_files -r --md5 -o ./manifest.json
+~~~
 
-# Sort a folder into subfolders by file category
-python3 evidencevault.py sort ./inbox --by category -o ./sorted
-```
+SHA-256 is the default hash.
+BLAKE2b and BLAKE2s are also available.
+MD5 and SHA-1 remain available for legacy use.
+Use SHA-256 for a new case.
 
-## Command Reference
+The hash command calculates an optional MD5 value in the same file read.
+CSV exports protect file names that a spreadsheet could treat as formulas.
+These displayed names have an apostrophe prefix.
+JSON keeps the exact file names.
 
-### `encode` / `decode`
-```
-evidencevault.py encode PATH... -e {base64,base64url,base32,base16,base85,ascii85,urlenc}
-                                 [-r] [-o OUTPUT_DIR] [--compress] [--workers N]
-evidencevault.py decode PATH... [-e ENCODING] [-r] [-o OUTPUT_DIR] [--decompress] [--workers N]
-```
-Each input file becomes one output file with the codec's extension appended (e.g. `photo.jpg` → `photo.jpg.b64`). `decode` auto-detects the codec from that extension unless `-e` is given.
+If you select several source folders, the archive keeps each folder name.
+If two source paths still have the same logical destination, the program stops.
+Source roots must have distinct names.
 
-### `bundle` / `extract` / `verify`
-```
-evidencevault.py bundle PATH... -o OUTPUT [--format {json,zip}] [-e ENCODING] [-r]
-                                 [--compress] [--hash-algo {sha256,blake2b,blake2s,sha1,md5}]
-                                 [--case NAME] [--minify] [--workers N]
-evidencevault.py extract VAULT -o OUTPUT_DIR [--force]
-evidencevault.py verify  VAULT
-```
-A vault compiles a whole case into one portable file, in either of two containers:
+## Encode and decode working copies
 
-- **`--format json`** (default) — a single `.vault.json` with a manifest (relative path, codec, hash, size, mtime) and the text-encoded payload for every file, inline. Human-readable and diffable, but text encoding inflates size (Base64 alone adds ~33%).
-- **`--format zip`** — a real `.vault.zip` holding each file's raw bytes (natively DEFLATE-compressed) plus a `manifest.json` entry with the same hash/size/mtime metadata. No text-encoding overhead, so it's noticeably smaller — **use this for large cases**. `--encoding`/`--compress` are ignored in this mode (zip already compresses).
+A codec converts bytes to an encoded form and back.
+Supported codecs are Base64, URL-safe Base64, Base32, Base16, Base85, ASCII85, and URL encoding.
 
-Both containers are hashed per file with `--hash-algo` (default `sha256`; `blake2b`, `blake2s`, and `sha1` are also available — see the note on hashing below) and both work transparently with `extract`/`verify`, which auto-detect the container. `extract` re-checks each hash while writing; `--force` writes anyway on a mismatch (and still reports it). `verify` checks everything with zero disk writes. Vaults created by earlier EvidenceVault versions (plain SHA-256 `.vault.json`) still verify/extract correctly.
+~~~bash
+python3 Evidencevault.py encode ./case_files -r -o ./encoded_files
+python3 Evidencevault.py decode ./encoded_files -r -o ./decoded_files
+~~~
 
-**On hash algorithm choice:** SHA-256 stays the default because it's the most widely recognized standard in forensic/legal reporting. BLAKE2b/BLAKE2s are offered as alternatives, but whether they're actually *faster* than SHA-256 depends on your CPU — modern x86-64 chips with SHA hardware extensions (which OpenSSL uses for SHA-256/SHA-1, not for BLAKE2) can make SHA-256 outrun BLAKE2b by 2x or more. Benchmark on your own hardware before switching for speed; on hardware without SHA extensions (some ARM/older devices), BLAKE2 tends to come out ahead.
+Use --compress for zlib compression before encoding.
+Use --decompress to reverse that compression.
+Decode can select a codec from the encoded file extension.
 
-### `hash`
-```
-evidencevault.py hash PATH... [-r] [--algo {sha256,blake2b,blake2s,sha1,md5}] [--md5] [-o manifest.csv|manifest.json]
-```
-Streams every file through the chosen `--algo` (default SHA-256; optionally MD5 too, regardless of `--algo`) for a defensible integrity manifest. Omit `-o` to print `hash  path` pairs to stdout.
+Encoding is not encryption.
+Anyone with the encoded data can decode it.
 
-### `rename`
-```
-evidencevault.py rename PATH [-r] [--pattern TEMPLATE] [--start N] [--case {none,lower,upper,title}]
-                              [--hash-length N] [--folders] [--dry-run] [--audit-log LOG.csv]
-```
-Template tokens: `{name}` original stem, `{ext}` original extension, `{n}` / `{n:04d}` sequential index, `{hash}` first N hex chars of the file's SHA-256, `{date}` `YYYYMMDD`, `{time}` `HHMMSS`, `{parent}` parent folder name. Names are sanitized for Windows/Linux/macOS compatibility (illegal characters stripped, reserved Windows device names avoided, trailing dots/spaces trimmed). Collisions are auto-suffixed. **Always run `--dry-run` first on real evidence.**
+## Organize working copies
 
-### `sort`
-```
-evidencevault.py sort PATH [-r] [--by {ext,category,date,encoding}] [-o OUTPUT_DIR] [--dry-run]
-```
-`category` buckets into `images/documents/archives/encoded/video/audio/other`; `encoding` buckets by which EvidenceVault codec produced the file; `date` buckets by `YYYY-MM` of last modification.
+Rename and sort create copies by default.
+They keep the source paths unchanged.
+They also create an audit database in the output folder.
 
-### Global flags (all subcommands)
-`-v/--verbose` (debug logging), `--log-file PATH` (also log to file), `--timeout` (reserved for future use).
+~~~bash
+python3 Evidencevault.py rename ./case_files -r -o ./renamed_files \
+  --pattern "EVID_{n:04d}_{hash}{ext}" --dry-run
 
-## Startup Banner
+python3 Evidencevault.py rename ./case_files -r -o ./renamed_files \
+  --pattern "EVID_{n:04d}_{hash}{ext}"
 
-Every run prints a cyberpunk/retro-terminal vault banner (ANSI-colored ASCII art + a short "boot sequence") before the command executes — purely cosmetic, terminal-only.
+python3 Evidencevault.py sort ./case_files -r -o ./sorted_files --by category
+~~~
 
-- Auto-skipped when output isn't a real terminal (pipes, redirects, scripts never see it).
-- Suppress explicitly with `--no-banner` (or `-q`) *before* the subcommand: `evidencevault.py --no-banner encode ...`
-- Or set the environment variable `EVIDENCEVAULT_NO_BANNER=1` (also honors the standard `NO_COLOR` variable).
-- Falls back to a compact one-line banner on narrow terminals (e.g. Termux in portrait mode).
-- On legacy Windows `cmd.exe`, ANSI colors are enabled automatically — no extra setup needed.
+Rename tokens are {name}, {ext}, {n}, {hash}, {date}, {time}, and {parent}.
+The number token supports a format such as {n:04d}.
+Date and time tokens use UTC.
+Use --folders to rename parent folders in the working copy too.
 
-## Design Notes
+A dry run does not write files, a database, a report, or a log.
+Do not combine --dry-run with an output record option.
 
-- **Pure standard library** — `base64`, `hashlib`, `zlib`, `json`, `concurrent.futures`, `argparse`, `pathlib`. Nothing to install, nothing to break on an air-gapped analysis box.
-- **Parallelism** via `ProcessPoolExecutor`, scaled to `os.cpu_count()` by default — batch encoding scales with your cores.
-- **Streaming hashes** — `hash_file()` reads in 1 MB chunks, so multi-gigabyte evidence images don't get loaded into memory whole.
-- **Safety-first rename** — dry-run by default mindset, collision detection, and an optional CSV audit trail mapping every original path to its new name, so nothing is ever renamed without a paper trail.
-- **Exit codes** — `0` success, `1` bad input/no files, `2` partial batch failure, `3` hash mismatch (verify/extract), `130` interrupted.
+An in-place action changes source paths.
+Use it only on a working copy.
+It requires a database outside the source folder.
 
-## Version History
+~~~bash
+python3 Evidencevault.py rename ./working_copy --in-place \
+  --db ./records/audit.sqlite3 --pattern "EVID_{n:04d}{ext}"
+~~~
+
+In-place actions require hard link support and stay on one file system.
+Folder renames require an output folder.
+They are not available in place.
+
+## Reports and audit records
+
+Use --db to save a run.
+Use --report to write its HTML report.
+
+~~~bash
+python3 Evidencevault.py verify ./case.vault.zip \
+  --db ./records/audit.sqlite3 --report ./records/check.html
+
+python3 Evidencevault.py report --db ./records/audit.sqlite3 -o ./saved_report.html
+python3 Evidencevault.py report ./case.vault.zip -o ./fresh_report.html
+~~~
+
+A saved report uses the latest completed database run.
+Use --run-id to select a specific run.
+A fresh report checks the supplied archive.
+
+Reports include the case name, operator name, UTC run times, hashes, file results, and repeated hash groups.
+They use local CSS.
+They have no scripts, remote fonts, or network resources.
+The report escapes all supplied text.
+It has a print layout and a narrow-screen layout.
+
+The file type result uses a small set of known file signatures.
+It falls back to the extension.
+It does not identify malware or prove the real file format.
+
+The database stores run results and file actions.
+Rename and sort save a planned action before each file change.
+They save a complete or error action afterward.
+
+These records are not signed or protected against database edits.
+A hash manifest alone is not a full chain-of-custody record.
+
+## Safety and resource limits
+
+- Output paths must stay outside source folders, except for an explicit in-place action.
+- The program rejects symbolic links and nonregular source files.
+- Archive paths must be safe relative paths on Linux, Windows, and macOS.
+- The program rejects duplicate paths, case collisions, and file-versus-folder collisions.
+- Source files must keep the same identity, size, and change times during each read.
+- Most file operations use 1 MiB memory blocks.
+- An archive can list at most 100000 files.
+- A ZIP manifest can use at most 16 MiB.
+- A ZIP directory can use at most 64 MiB.
+- A JSON archive can use at most 64 MiB.
+- New JSON archives can contain at most 16 MiB of raw file data in total.
+- ASCII85 and URL decoding accept at most 16 MiB of encoded input.
+- Restored files have a default limit of 2 GiB each and 20 GiB in total.
+
+Use --max-file-bytes and --max-total-bytes to change archive check limits.
+These options accept whole byte counts.
+Collect accepts the same limits.
+Decode accepts --max-file-bytes.
+
+Use --workers to select from one to 32 file workers.
+The default is at most four workers.
+The task queue holds at most two tasks per worker.
+ZIP reads reuse one archive handle per worker.
+Full source reads reuse one buffer per active task.
+On Linux, large sequential reads can use an optional file system read hint.
+Hash-based rename plans calculate their file hashes with the bounded workers.
+The finished copy must still match its planned hash.
+Sort plans for extensions, months, and encodings do not read source contents.
+ZIP creation and in-place path changes run in sequence.
+The default ZIP compression level is six.
+Use --compression to select a level from one to nine.
+
+## Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | The requested operation completed. A dry-run plan can also return zero. |
+| 1 | A report input or guided menu request failed. |
+| 2 | An input, file operation, or output record failed. Command option errors also use two. |
+| 3 | A file hash or payload size did not match. |
+| 130 | The operator stopped the command. |
+
+## Scope
+
+EvidenceVault handles existing regular files.
+It does not acquire a forensic disk image or recover deleted files.
+It does not encrypt files, authenticate an operator, or sign a manifest.
+
+Original modification times remain in the manifest.
+Restored files have new file system times and permissions.
+The package does not preserve empty folders, access controls, or extended attributes.
+
+A completed case can contain a partial result if a later output record fails.
+Check the exit code and report before you hand over a case.
+
+## Tests and code guide
+
+Python 3.8 or a newer version is required.
+The target systems are Linux, Windows, macOS, and Termux.
+The CI workflow checks Linux, Windows, and macOS with several Python versions.
+
+~~~bash
+python3 -m compileall -q evidencevault Evidencevault.py tests
+python3 -m unittest discover -s tests -v
+~~~
+
+Read [the code guide](docs/CODE_GUIDE.md) for a module map and a school presentation walkthrough.
+Read [the contribution guide](CONTRIBUTING.md) for the code and writing rules.
+Read [the benchmark guide](benchmarks/README.md) for measured planning results and their limits.
+
+Create a complete dummy case and sample results for all ten operations.
+From the repository folder, run:
+
+~~~bash
+python3 -m examples.build_demo -o ./demo_output
+~~~
+
+You can also start the script from the examples folder:
+
+~~~bash
+cd examples
+python3 build_demo.py
+~~~
+
+The script uses the local package. No separate package installation is required.
+Without -o, it creates demo_output in the current folder.
+Use -o with a new folder for another run:
+
+~~~bash
+python3 build_demo.py -o ./another_demo
+~~~
+
+The output folder must be new.
+Open demo_output/case/report.html to inspect the sample HTML report.
+Read demo_output/results.json for the sample command results.
+The sample files and events are synthetic.
+
+## Version history
+
+### 1.1.1
+
+- Fixed unsafe extraction paths, output replacement, rename collisions, and false success results.
+- Added strict manifest checks and bounded decompression.
+- Fixed MD5-only file inventories and source folder identity.
+- Added the guided menu and the collect workflow.
+- Added SQLite audit records and offline HTML reports.
+- Added file signature categories and repeated hash groups.
+- Added bounded file workers, streaming codecs, and one-pass ZIP hashing.
+- Changed rename and sort to create working copies by default.
+- Added modules, file safety tests, and a CI workflow.
+- Kept one launcher and added module startup and a student code guide.
+- Added the Windows network installer and its CI check.
+- Added shared read buffers, parallel hash-name plans, and measured planning results.
+- Added a dummy case builder for all ten main operations.
+- Fixed direct demo startup and added a default sample output folder.
 
 ### 1.1.0
-- Added `bundle --format zip` — a size-optimized vault container (raw bytes + native DEFLATE compression + a `manifest.json` entry), alongside the original `json` format. Recommended for large cases; `extract`/`verify` auto-detect either container.
-- Added `--hash-algo`/`--algo` (`sha256` default, plus `blake2b`, `blake2s`, `sha1`, `md5`) to `bundle` and `hash`, so integrity hashing isn't locked to SHA-256.
-- Vaults from 1.0.0 (plain SHA-256 `.vault.json`, no `hash_algo` field) remain fully compatible with `verify`/`extract`.
+
+Added ZIP archives and more hash algorithm options.
 
 ### 1.0.0
-- Initial release: multi-codec `encode`/`decode` (Base64/32/16/85, ASCII85, URL-encoding), JSON `bundle`/`extract`/`verify` vaults with SHA-256 integrity, `hash` chain-of-custody manifests, template-driven `rename` with audit trail, `sort` by extension/category/date/encoding, and the cyberpunk/retro-terminal startup banner.
 
-## License
+Added encoding, JSON archives, hashing, renaming, and sorting.
 
-Apache License 2.0 — see [LICENSE](LICENSE). Use it, fork it, build on it — including commercially — just keep the copyright/license notice and note any changes you make.
+## Upgrade from 1.1.0
+
+Get the full repository. The launcher now imports the package modules.
+Bundle uses ZIP by default. Select --format json for the old container choice.
+Encode and decode require an output folder.
+Rename and sort require an output folder or an explicit audited in-place action.
+Extraction does not support --force.
+The unused --timeout option and animated banner were removed.
+The old --audit-log option is replaced by the SQLite audit database.
+
+Versions 1.0 and 1.1 JSON archives remain readable when their manifests pass the safety checks.
+
+## Contributors and license
+
+Original project: [DezTheJackal](https://github.com/DezTheJackal).
+Version 1.1.1 updates: [0xb0rn3](https://github.com/0xb0rn3), also known as oxbv1.
+
+Apache License 2.0. See [LICENSE](LICENSE).
