@@ -19,7 +19,7 @@ Get the full repository.
 The program now uses small modules. Do not copy only the launcher file.
 
 ~~~bash
-git clone https://github.com/0xb0rn3/EvidenceVAULT.git
+git clone https://github.com/DezTheJackal/EvidenceVAULT.git
 cd EvidenceVAULT
 python3 Evidencevault.py
 ~~~
@@ -45,7 +45,7 @@ If input is not a terminal, the program shows help instead of an input prompt.
 Run this command in PowerShell on Windows 10 or Windows 11:
 
 ~~~powershell
-irm https://raw.githubusercontent.com/0xb0rn3/EvidenceVAULT/main/install-windows.ps1 | iex
+irm https://raw.githubusercontent.com/DezTheJackal/EvidenceVAULT/main/install-windows.ps1 | iex
 evidencevault
 ~~~
 
@@ -64,7 +64,7 @@ An existing install folder is not replaced.
 To select a new install folder, download and run the script:
 
 ~~~powershell
-irm https://raw.githubusercontent.com/0xb0rn3/EvidenceVAULT/main/install-windows.ps1 -OutFile install-windows.ps1
+irm https://raw.githubusercontent.com/DezTheJackal/EvidenceVAULT/main/install-windows.ps1 -OutFile install-windows.ps1
 & .\install-windows.ps1 -InstallDir "$env:LOCALAPPDATA\EvidenceVault-1.1.1"
 ~~~
 
