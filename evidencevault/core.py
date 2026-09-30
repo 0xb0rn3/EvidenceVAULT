@@ -312,6 +312,23 @@ def write_json(destination: Path, value: dict, compact: bool = False) -> None:
         stream.write(json.dumps(value, indent=None if compact else 2, ensure_ascii=True).encode("utf-8"))
 
 
+def read_blocks(stream: BinaryIO, size: int = CHUNK_SIZE) -> Iterator[memoryview]:
+    """Reuse one buffer. Consume each block before the next read."""
+    if size >= 8 * CHUNK_SIZE and hasattr(os, "posix_fadvise"):
+        try:
+            os.posix_fadvise(stream.fileno(), 0, 0, os.POSIX_FADV_SEQUENTIAL)
+        except OSError:
+            # A read hint is optional. It must not stop a file operation.
+            pass
+    buffer = bytearray(max(1, min(size, CHUNK_SIZE)))
+    view = memoryview(buffer)
+    while True:
+        count = stream.readinto(buffer)
+        if not count:
+            return
+        yield view[:count]
+
+
 def bounded_map(function: Callable, values: Iterable, workers: int) -> Iterator:
     """Keep at most two jobs per worker in the queue."""
     if not 1 <= workers <= 32:
@@ -361,9 +378,9 @@ def hash_source(source: Source, algorithm: str = "sha256", also_md5: bool = Fals
     extra = hashlib.md5() if also_md5 and algorithm != "md5" else None
     header = b""
     with open_source(source.path) as (stream, details):
-        for block in iter(lambda: stream.read(CHUNK_SIZE), b""):
+        for block in read_blocks(stream, details.st_size):
             if not header:
-                header = block[:64]
+                header = bytes(block[:64])
             digest.update(block)
             if extra is not None:
                 extra.update(block)

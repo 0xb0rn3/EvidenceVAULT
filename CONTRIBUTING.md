@@ -44,6 +44,16 @@ python -m compileall -q evidencevault Evidencevault.py tests
 python -m unittest discover -s tests -v
 ~~~
 
+On Windows, also run the installer check:
+
+~~~powershell
+& .\tests\test_windows_install.ps1
+~~~
+
+This check uses the local source and installed Python.
+It does not download a runtime or change the user PATH.
+CI runs the check with Windows PowerShell 5.1 and PowerShell 7.
+
 Use a commit subject that describes the change.
 Describe the problem, new behavior, checks, and limits in the pull request.
 Keep the original license and attribution.

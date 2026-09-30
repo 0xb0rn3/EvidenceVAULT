@@ -21,6 +21,7 @@ from evidencevault.audit import load_run
 from evidencevault.cli import main
 from evidencevault.core import CHUNK_SIZE, CODECS, FileResult, RunResult, VaultError, open_source, output_writer
 from evidencevault.report import create_report
+from evidencevault.operations import new_name
 
 
 class WorkflowTests(unittest.TestCase):
@@ -238,6 +239,29 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(code, 0, errors)
         self.assertTrue((output / "report.html").is_file())
 
+    def test_guided_encode_and_decode(self):
+        encoded = self.root / "guided-encoded"
+        decoded = self.root / "guided-decoded"
+        choices = (
+            ["9", str(self.source), str(encoded), "", "", "1", "n", ""],
+            ["10", str(encoded), str(decoded), "", "", "1", "n", ""],
+        )
+        for answers in choices:
+            values = iter(answers)
+            with patch("sys.stdin.isatty", return_value=True), patch("builtins.input", side_effect=lambda _: next(values)):
+                code, _, errors = self.command("wizard")
+            self.assertEqual(code, 0, errors)
+        self.assertEqual((decoded / "note.txt").read_bytes(), b"case note\n")
+        self.assertEqual((decoded / "sub/image.png").read_bytes(), (self.source / "sub/image.png").read_bytes())
+
+    def test_guided_archive_workflow(self):
+        archive = self.root / "guided.zip"
+        values = iter(["8", str(self.source), str(archive), "", "", "1", ""])
+        with patch("sys.stdin.isatty", return_value=True), patch("builtins.input", side_effect=lambda _: next(values)):
+            code, _, errors = self.command("wizard")
+        self.assertEqual(code, 0, errors)
+        self.assertEqual(self.command("verify", archive)[0], 0)
+
     def test_noninteractive_start_does_not_wait_for_input(self):
         with patch("sys.stdin.isatty", return_value=False), patch("builtins.input", side_effect=AssertionError("Unexpected input request")):
             self.assertEqual(self.command()[0], 0)
@@ -349,7 +373,7 @@ class WorkflowTests(unittest.TestCase):
     def test_changed_source_does_not_publish_a_copy(self):
         source = self.root / "changing.bin"
         source.write_bytes(b"original")
-        def changing_blocks(stream):
+        def changing_blocks(stream, size):
             yield stream.read()
             source.write_bytes(b"changed contents")
         with patch("evidencevault.operations.raw_blocks", changing_blocks):
@@ -491,6 +515,37 @@ class WorkflowTests(unittest.TestCase):
         original = source.read_bytes()
         self.assertNotEqual(self.command("hash", self.source, "--db", database)[0], 0)
         self.assertEqual(source.read_bytes(), original)
+
+    def test_large_source_keeps_its_first_signature(self):
+        source = self.root / "capture.bin"
+        payload = b"\x89PNG\r\n\x1a\n" + b"z" * (CHUNK_SIZE * 2)
+        source.write_bytes(payload)
+        database = self.root / "signature.sqlite3"
+        self.assertEqual(self.command("hash", source, "--db", database)[0], 0)
+        row = load_run(database).files[0]
+        self.assertEqual(row.kind, "image")
+        self.assertEqual(row.digest, hashlib.sha256(payload).hexdigest())
+
+    def test_parallel_hash_names_are_stable(self):
+        source = self.source / "note.txt"
+        name = "EVID_0001_" + hashlib.sha256(source.read_bytes()).hexdigest()[:8] + ".txt"
+        for workers in (1, 4):
+            output = self.root / ("names-" + str(workers))
+            code, _, errors = self.command("rename", source, "-o", output, "--pattern", "EVID_{n:04d}_{hash}{ext}", "--workers", workers)
+            self.assertEqual(code, 0, errors)
+            self.assertEqual((output / name).read_bytes(), source.read_bytes())
+
+    def test_hash_name_does_not_publish_changed_contents(self):
+        source = self.source / "note.txt"
+        def changed_name(*arguments, **options):
+            name = new_name(*arguments, **options)
+            source.write_bytes(b"contents changed after planning")
+            return name
+        output = self.root / "changed-name"
+        with patch("evidencevault.operations.new_name", side_effect=changed_name):
+            code, _, _ = self.command("rename", source, "-o", output, "--pattern", "{hash}{ext}")
+        self.assertEqual(code, 3)
+        self.assertEqual(list(output.glob("*.txt")), [])
 
 
 if __name__ == "__main__":

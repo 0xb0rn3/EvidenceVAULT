@@ -134,25 +134,40 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def select_option(label: str, options: tuple) -> str:
+    """Show names and accept a number. Keep the first option as the default."""
+    print("\n" + label)
+    for number, (value, name) in enumerate(options, start=1):
+        print(str(number) + "  " + name)
+    while True:
+        choice = input("Select a number [1]: ").strip() or "1"
+        if choice.isdigit() and 1 <= int(choice) <= len(options):
+            return options[int(choice) - 1][0]
+        print("Select a listed number.", file=sys.stderr)
+
+
 def guided_menu() -> int:
     if not sys.stdin.isatty():
         print("The guided menu requires a terminal. Use --help for direct commands.", file=sys.stderr)
         return 1
     print("\nEvidenceVault " + VERSION)
-    for number, label in enumerate((
-        "Prepare a case package", "Check a case package", "Restore checked files",
-        "Create a file inventory", "Organize working copies", "Rename working copies",
-        "Create a report from a saved run",
-    ), start=1):
+    actions = (
+        ("collect", "Prepare a case package"), ("verify", "Check a case package"),
+        ("extract", "Restore checked files"), ("hash", "Create a file inventory"),
+        ("sort", "Organize working copies"), ("rename", "Rename working copies"),
+        ("report", "Create a report from a saved run"), ("bundle", "Create an archive"),
+        ("encode", "Encode working copies"), ("decode", "Decode working copies"),
+    )
+    for number, (_, label) in enumerate(actions, start=1):
         print(str(number) + "  " + label)
     print("0  Exit")
     try:
         choice = input("\nSelect an action [1]: ").strip() or "1"
         if choice == "0":
             return 0
-        names = {"1": "collect", "2": "verify", "3": "extract", "4": "hash", "5": "sort", "6": "rename", "7": "report"}
+        names = {str(number): action for number, (action, _) in enumerate(actions, start=1)}
         if choice not in names:
-            print("Select a number from 0 to 7.", file=sys.stderr)
+            print("Select a number from 0 to " + str(len(actions)) + ".", file=sys.stderr)
             return 1
         action = names[choice]
         label = "Database path" if action == "report" else ("Archive path" if action in ("verify", "extract") else "Source path")
@@ -166,14 +181,32 @@ def guided_menu() -> int:
             default = {
                 "collect": "case_output", "extract": "restored_files", "hash": "manifest.json",
                 "sort": "sorted_files", "rename": "renamed_files", "report": "report.html",
+                "bundle": "case.vault.zip", "encode": "encoded_files", "decode": "decoded_files",
             }[action]
             output = str(Path(input("Output path [" + default + "]: ").strip() or default).expanduser())
             arguments += ["-o", output]
-        if action in ("collect", "hash", "sort", "rename"):
+        if action in ("collect", "hash", "sort", "rename", "bundle", "encode", "decode"):
             if action != "collect":
                 arguments.append("-r")
             arguments += ["--case-name", input("Case name [optional]: ").strip()]
             arguments += ["--operator", input("Operator name [optional]: ").strip()]
+        if action == "bundle":
+            container = select_option("Archive format", (("zip", "ZIP"), ("json", "JSON for a small case")))
+            arguments += ["--format", container]
+        if action in ("encode", "decode"):
+            codecs = tuple((name, name) for name in CODECS)
+            if action == "decode":
+                codecs = (("auto", "Use the file extension"),) + codecs
+            encoding = select_option("File encoding", codecs)
+            if encoding != "auto":
+                arguments += ["--encoding", encoding]
+            question = "Was zlib compression used [y/N]: " if action == "decode" else "Compress before encoding [y/N]: "
+            if input(question).strip().lower() in ("y", "yes"):
+                arguments.append("--decompress" if action == "decode" else "--compress")
+        if action == "sort":
+            rule = select_option("Folder rule", (("category", "File category"), ("ext", "File extension"),
+                                               ("date", "Modification month"), ("encoding", "File encoding")))
+            arguments += ["--by", rule]
         if action == "rename":
             pattern = input("File name template [EVID_{n:04d}{ext}]: ").strip() or "EVID_{n:04d}{ext}"
             arguments += ["--pattern", pattern]

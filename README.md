@@ -8,7 +8,7 @@
 
 EvidenceVault helps an operator package, check, and organize local case files.
 It uses Python and the standard library.
-It has no runtime package dependencies or network features.
+The file commands need no runtime packages and do not use the network.
 
 Use it for working copies of incident response files, investigation notes, screenshots, and other collected material.
 Keep the original evidence and separate collection records.
@@ -30,6 +30,7 @@ On Termux, install Python with pkg install python.
 The menu asks for the source, output, case name, and operator name.
 You do not need to remember the command sequence.
 Rename and sort actions show their file plan before you start.
+All ten main file operations are available in the menu.
 
 You can also start the package as a module:
 
@@ -38,6 +39,38 @@ python3 -m evidencevault
 ~~~
 
 If input is not a terminal, the program shows help instead of an input prompt.
+
+## Install on Windows with PowerShell
+
+Run this command in PowerShell on Windows 10 or Windows 11:
+
+~~~powershell
+irm https://raw.githubusercontent.com/0xb0rn3/EvidenceVAULT/main/install-windows.ps1 | iex
+evidencevault
+~~~
+
+The installer downloads the complete main branch over HTTPS.
+It reuses Python 3.11 or a newer version when available.
+Otherwise, it installs Python 3.13 for the current user with WinGet.
+If WinGet is unavailable or fails, it uses the Python 3.13.15 installer from python.org.
+It checks that installer's SHA-256 value before it starts the installer.
+
+The default folder is %LOCALAPPDATA%\EvidenceVault.
+The installer creates a separate .venv environment and a bin\evidencevault.cmd command.
+It adds the bin folder to the user PATH and the current terminal PATH.
+It does not require a Git installation.
+An existing install folder is not replaced.
+
+To select a new install folder, download and run the script:
+
+~~~powershell
+irm https://raw.githubusercontent.com/0xb0rn3/EvidenceVAULT/main/install-windows.ps1 -OutFile install-windows.ps1
+& .\install-windows.ps1 -InstallDir "$env:LOCALAPPDATA\EvidenceVault-1.1.1"
+~~~
+
+The script supports PowerShell 5.1 and PowerShell 7.
+Use -Revision with a full commit hash to select an exact source version.
+If a later terminal cannot find evidencevault, open a new terminal.
 
 ## Prepare a case in one command
 
@@ -242,6 +275,11 @@ Use --workers to select from one to 32 file workers.
 The default is at most four workers.
 The task queue holds at most two tasks per worker.
 ZIP reads reuse one archive handle per worker.
+Full source reads reuse one buffer per active task.
+On Linux, large sequential reads can use an optional file system read hint.
+Hash-based rename plans calculate their file hashes with the bounded workers.
+The finished copy must still match its planned hash.
+Sort plans for extensions, months, and encodings do not read source contents.
 ZIP creation and in-place path changes run in sequence.
 The default ZIP compression level is six.
 Use --compression to select a level from one to nine.
@@ -282,6 +320,18 @@ python3 -m unittest discover -s tests -v
 
 Read [the code guide](docs/CODE_GUIDE.md) for a module map and a school presentation walkthrough.
 Read [the contribution guide](CONTRIBUTING.md) for the code and writing rules.
+Read [the benchmark guide](benchmarks/README.md) for measured planning results and their limits.
+
+Create a complete dummy case and sample results for all ten operations:
+
+~~~bash
+python3 -m examples.build_demo -o ./demo_output
+~~~
+
+The output folder must be new.
+Open demo_output/case/report.html to inspect the sample HTML report.
+Read demo_output/results.json for the sample command results.
+The sample files and events are synthetic.
 
 ## Version history
 
@@ -297,6 +347,9 @@ Read [the contribution guide](CONTRIBUTING.md) for the code and writing rules.
 - Changed rename and sort to create working copies by default.
 - Added modules, file safety tests, and a CI workflow.
 - Kept one launcher and added module startup and a student code guide.
+- Added the Windows network installer and its CI check.
+- Added shared read buffers, parallel hash-name plans, and measured planning results.
+- Added a dummy case builder for all ten main operations.
 
 ### 1.1.0
 

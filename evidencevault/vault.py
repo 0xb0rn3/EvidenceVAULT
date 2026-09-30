@@ -16,7 +16,7 @@ from . import VERSION
 from .core import (
     CHUNK_SIZE, CODECS, HASH_ALGOS, FileResult, IntegrityError, RunResult, Source,
     VaultError, bounded_map, check_unique, detect_kind, open_source,
-    output_writer, portable_path, utc_mtime, utc_now, write_json,
+    output_writer, portable_path, read_blocks, utc_mtime, utc_now, write_json,
 )
 
 MAX_JSON_BYTES = 64 * 1024 * 1024
@@ -102,9 +102,9 @@ def create_vault(
                 # Hash the same bytes that enter the archive.
                 with open_source(source.path) as (reader, details):
                     with archive.open("files/" + source.relative, "w", force_zip64=True) as target:
-                        for block in iter(lambda: reader.read(CHUNK_SIZE), b""):
+                        for block in read_blocks(reader, details.st_size):
                             if not header:
-                                header = block[:64]
+                                header = bytes(block[:64])
                             digest.update(block)
                             target.write(block)
                 value = digest.hexdigest()

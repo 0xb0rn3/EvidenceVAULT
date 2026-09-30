@@ -15,6 +15,9 @@ Each module has one main responsibility.
 | evidencevault/report.py | Convert a run result to safe HTML. |
 | evidencevault/report.css | Set the report layout and print style. |
 | tests/test_workflows.py | Check complete file operations with temporary data. |
+| install-windows.ps1 | Install Python, the complete program, and its Windows command. |
+| examples/build_demo.py | Run each main operation with synthetic files. |
+| benchmarks/benchmark_io.py | Measure file plans and source reads with sample data. |
 
 ## Follow one case operation
 
@@ -64,6 +67,19 @@ The writer hashes and compresses each source in one read.
 Database writes stay in the command thread.
 This avoids a shared database connection between workers.
 In-place path changes run in sequence.
+
+Rename plans with hash tokens use the same bounded hash workers.
+The working copy must match its planned hash before publication.
+Extension, month, and encoding sort plans use names or metadata instead of file contents.
+
+Full source reads reuse one buffer.
+Each consumer must finish with a block before the next block replaces that buffer.
+The first file signature is copied to a small separate value.
+This keeps the signature stable when the buffer is reused.
+
+The Python code calls compiled standard-library I/O, hash, and compression routines.
+The project does not require an extension build.
+Read the benchmark guide for the measured result and its limits.
 
 ## Explain the file type result
 

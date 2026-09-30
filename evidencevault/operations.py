@@ -13,9 +13,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .core import (
-    CHUNK_SIZE, CODECS, EXT_TO_CODEC, FileResult, RunResult, Source, VaultError,
+    CHUNK_SIZE, CODECS, EXT_TO_CODEC, FileResult, IntegrityError, RunResult, Source, VaultError,
     bounded_map, check_unique, detect_kind, hash_source, open_source,
-    output_writer, portable_path, reject_symlinks, utc_mtime, write_json,
+    output_writer, portable_path, read_blocks, reject_symlinks, utc_mtime, write_json,
 )
 from .vault import MAX_JSON_RAW_BYTES
 
@@ -80,8 +80,8 @@ def hash_files(sources: list[Source], result: RunResult, algorithm: str, md5: bo
     return extra
 
 
-def raw_blocks(stream):
-    yield from iter(lambda: stream.read(CHUNK_SIZE), b"")
+def raw_blocks(stream, size: int = CHUNK_SIZE):
+    yield from read_blocks(stream, size)
 
 
 def compressed_blocks(blocks):
@@ -172,7 +172,7 @@ def transform_files(sources: list[Source], output: Path, result: RunResult, args
             total = 0
             with output_writer(destination) as target:
                 with open_source(source.path) as (stream, details):
-                    blocks = decode_blocks(stream, encoding) if decode else raw_blocks(stream)
+                    blocks = decode_blocks(stream, encoding) if decode else raw_blocks(stream, details.st_size)
                     if decode:
                         if args.decompress:
                             blocks = inflate_blocks(blocks)
@@ -198,7 +198,7 @@ def transform_files(sources: list[Source], output: Path, result: RunResult, args
     result.files.extend(bounded_map(worker, tasks, args.workers))
 
 
-def new_name(source: Source, index: int, pattern: str, case: str, hash_length: int, stamp: datetime, folder: bool = False) -> str:
+def new_name(source: Source, index: int, pattern: str, case: str, hash_length: int, stamp: datetime, folder: bool = False, digest: str = "") -> str:
     fields = {
         "name": source.path.name if folder else source.path.stem,
         "ext": "" if folder else source.path.suffix, "n": index,
@@ -211,7 +211,7 @@ def new_name(source: Source, index: int, pattern: str, case: str, hash_length: i
         if field is not None and spec and (field != "n" or not re.fullmatch(r"0?\d{0,3}d", spec)):
             raise VaultError("Only the file number supports a format such as n:04d.")
     if "{hash}" in pattern and not folder:
-        fields["hash"] = hash_source(source)[0].digest[:hash_length]
+        fields["hash"] = (digest or hash_source(source)[0].digest)[:hash_length]
     name = pattern.format(**fields)
     if not folder and "{ext}" not in pattern and not Path(name).suffix:
         name += source.path.suffix
@@ -222,16 +222,18 @@ def new_name(source: Source, index: int, pattern: str, case: str, hash_length: i
     return portable_path(name)
 
 
-def copy_source(source: Source, destination: Path) -> FileResult:
+def copy_source(source: Source, destination: Path, expected_hash: str = "") -> FileResult:
     digest = hashlib.sha256()
     header = b""
     with output_writer(destination) as target:
         with open_source(source.path) as (stream, details):
-            for block in raw_blocks(stream):
+            for block in raw_blocks(stream, details.st_size):
                 if not header:
-                    header = block[:64]
+                    header = bytes(block[:64])
                 digest.update(block)
                 target.write(block)
+        if expected_hash and digest.hexdigest() != expected_hash:
+            raise IntegrityError("The source contents changed after the rename plan.")
     return FileResult(
         path=source.relative, destination=str(destination), size=details.st_size,
         digest=digest.hexdigest(), modified_utc=utc_mtime(details),
@@ -244,6 +246,11 @@ def organize_files(sources: list[Source], output: Path, result: RunResult, args,
     stamp = datetime.now(timezone.utc)
     plan = []
     folder_names = {}
+    name_hashes = {}
+    if result.action == "rename" and "{hash}" in args.pattern:
+        def hash_name(source):
+            return source.relative, hash_source(source)[0].digest
+        name_hashes = dict(bounded_map(hash_name, sources, args.workers))
     if result.action == "rename" and args.folders:
         parents = sorted({
             parent.as_posix()
@@ -260,7 +267,8 @@ def organize_files(sources: list[Source], output: Path, result: RunResult, args,
             )
     for index, source in enumerate(sources, start=getattr(args, "start", 1)):
         if result.action == "rename":
-            name = new_name(source, index, args.pattern, args.case_style, args.hash_length, stamp)
+            name = new_name(source, index, args.pattern, args.case_style, args.hash_length, stamp,
+                            digest=name_hashes.get(source.relative, ""))
             parent = Path(source.relative).parent
             components = [
                 folder_names.get(Path(*parent.parts[:number + 1]).as_posix(), part)
@@ -268,16 +276,15 @@ def organize_files(sources: list[Source], output: Path, result: RunResult, args,
             ]
             relative = Path(*components, name).as_posix()
         else:
-            with open_source(source.path) as (stream, details):
-                kind = detect_kind(stream.read(64), source.path.name)
             if args.by == "ext":
                 bucket = source.path.suffix.lower().lstrip(".") or "no_extension"
             elif args.by == "date":
-                bucket = datetime.fromtimestamp(details.st_mtime, timezone.utc).strftime("%Y-%m")
+                bucket = datetime.fromtimestamp(source.path.stat().st_mtime, timezone.utc).strftime("%Y-%m")
             elif args.by == "encoding":
                 bucket = EXT_TO_CODEC.get(source.path.suffix.lstrip("."), "unencoded")
             else:
-                bucket = kind
+                with open_source(source.path) as (stream, _):
+                    bucket = detect_kind(stream.read(64), source.path.name)
             relative = source.relative if source.relative.startswith(bucket + "/") else bucket + "/" + source.relative
         relative = portable_path(relative)
         destination = source.path.with_name(Path(relative).name) if args.in_place else output / relative
@@ -295,11 +302,11 @@ def organize_files(sources: list[Source], output: Path, result: RunResult, args,
         def worker(job):
             source, destination = job
             try:
-                return source, copy_source(source, destination)
+                return source, copy_source(source, destination, name_hashes.get(source.relative, ""))
             except Exception as error:
                 return source, FileResult(
                     path=source.relative, destination=str(destination),
-                    status="error", note=str(error),
+                    status="mismatch" if isinstance(error, IntegrityError) else "error", note=str(error),
                 )
         for source, row in bounded_map(worker, jobs(), args.workers):
             result.files.append(row)
@@ -320,6 +327,9 @@ def organize_files(sources: list[Source], output: Path, result: RunResult, args,
                 audit.event(result, "planned", str(source.path), str(destination))
             if args.in_place:
                 row = hash_source(source)[0]
+                expected = name_hashes.get(source.relative, "")
+                if expected and row.digest != expected:
+                    raise IntegrityError("The source contents changed after the rename plan.")
                 reject_symlinks(destination)
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 reject_symlinks(destination)
@@ -336,7 +346,8 @@ def organize_files(sources: list[Source], output: Path, result: RunResult, args,
                 audit.event(result, "complete", str(source.path), str(destination), row.digest)
         except Exception as error:
             result.files.append(FileResult(
-                path=source.relative, destination=str(destination), status="error", note=str(error),
+                path=source.relative, destination=str(destination),
+                status="mismatch" if isinstance(error, IntegrityError) else "error", note=str(error),
             ))
             if audit:
                 audit.event(result, "error", str(source.path), str(destination), str(error))
