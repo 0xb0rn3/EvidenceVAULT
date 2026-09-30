@@ -31,10 +31,9 @@ The menu asks for the source, output, case name, and operator name.
 You do not need to remember the command sequence.
 Rename and sort actions show their file plan before you start.
 
-You can also use either launcher:
+You can also start the package as a module:
 
 ~~~bash
-python3 evidencevault.py
 python3 -m evidencevault
 ~~~
 
@@ -277,7 +276,7 @@ The target systems are Linux, Windows, macOS, and Termux.
 The CI workflow checks Linux, Windows, and macOS with several Python versions.
 
 ~~~bash
-python3 -m compileall -q evidencevault Evidencevault.py evidencevault.py tests
+python3 -m compileall -q evidencevault Evidencevault.py tests
 python3 -m unittest discover -s tests -v
 ~~~
 
@@ -297,7 +296,7 @@ Read [the contribution guide](CONTRIBUTING.md) for the code and writing rules.
 - Added bounded file workers, streaming codecs, and one-pass ZIP hashing.
 - Changed rename and sort to create working copies by default.
 - Added modules, file safety tests, and a CI workflow.
-- Added a lowercase launcher and a student code guide.
+- Kept one launcher and added module startup and a student code guide.
 
 ### 1.1.0
 

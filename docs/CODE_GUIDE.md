@@ -6,7 +6,7 @@ Each module has one main responsibility.
 | File | Responsibility |
 |---|---|
 | Evidencevault.py | Start the program with the original file name. |
-| evidencevault.py | Start the program with a lowercase file name. |
+| evidencevault/__main__.py | Start the program with python -m evidencevault. |
 | evidencevault/cli.py | Read command options and show the guided menu. |
 | evidencevault/core.py | Read files, check paths, and publish output files. |
 | evidencevault/vault.py | Create archives and check their contents. |

@@ -26,6 +26,6 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - name: Check the Python source
-        run: python -m compileall -q evidencevault Evidencevault.py evidencevault.py tests
+        run: python -m compileall -q evidencevault Evidencevault.py tests
       - name: Check file safety and operator workflows
         run: python -m unittest discover -s tests -v

@@ -40,7 +40,7 @@ The project uses these technical terms:
 Use these checks:
 
 ~~~bash
-python -m compileall -q evidencevault Evidencevault.py evidencevault.py tests
+python -m compileall -q evidencevault Evidencevault.py tests
 python -m unittest discover -s tests -v
 ~~~
 
