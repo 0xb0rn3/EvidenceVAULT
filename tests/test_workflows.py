@@ -14,11 +14,12 @@ import zlib
 import warnings
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from evidencevault.audit import load_run
 from evidencevault.cli import main
-from evidencevault.core import CHUNK_SIZE, CODECS, FileResult, RunResult, open_source, output_writer
+from evidencevault.core import CHUNK_SIZE, CODECS, FileResult, RunResult, VaultError, open_source, output_writer
 from evidencevault.report import create_report
 
 
@@ -354,6 +355,27 @@ class WorkflowTests(unittest.TestCase):
         with patch("evidencevault.operations.raw_blocks", changing_blocks):
             self.assertNotEqual(self.command("sort", source, "-o", self.root / "sorted")[0], 0)
         self.assertFalse((self.root / "sorted/other/changing.bin").exists())
+
+    def test_source_read_accepts_different_path_time_values(self):
+        source = self.source / "note.txt"
+        metadata = source.stat()
+        path_metadata = SimpleNamespace(
+            st_mode=metadata.st_mode, st_dev=metadata.st_dev, st_ino=metadata.st_ino, st_size=metadata.st_size,
+            st_mtime_ns=metadata.st_mtime_ns, st_ctime_ns=metadata.st_ctime_ns - 1000000000,
+        )
+        with patch("evidencevault.core.os.stat", return_value=path_metadata):
+            with open_source(source) as (stream, _):
+                self.assertEqual(stream.read(), b"case note\n")
+
+    @unittest.skipUnless(os.name == "posix", "The system must allow replacement of an open file.")
+    def test_replaced_source_is_rejected_even_with_the_same_bytes(self):
+        source = self.source / "note.txt"
+        replacement = self.root / "replacement.txt"
+        replacement.write_bytes(source.read_bytes())
+        with self.assertRaisesRegex(VaultError, "changed during the read"):
+            with open_source(source) as (stream, _):
+                self.assertEqual(stream.read(), b"case note\n")
+                os.replace(replacement, source)
 
     def test_invalid_base64_does_not_publish_a_file(self):
         source = self.root / "bad.b64"

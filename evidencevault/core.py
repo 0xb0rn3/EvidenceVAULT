@@ -214,7 +214,8 @@ def collect_sources(paths: list[str], recursive: bool) -> list[Source]:
 def open_source(path: Path) -> Iterator[tuple[BinaryIO, os.stat_result]]:
     """Check that the same regular file stays in place during a read."""
     reject_symlinks(path)
-    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    flags = (os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+             | getattr(os, "O_NONBLOCK", 0))
     descriptor = os.open(path, flags)
     with os.fdopen(descriptor, "rb") as stream:
         before = os.fstat(stream.fileno())
@@ -222,10 +223,17 @@ def open_source(path: Path) -> Iterator[tuple[BinaryIO, os.stat_result]]:
             raise VaultError("The source is not a regular file.")
         yield stream, before
         after = os.fstat(stream.fileno())
-        current = os.stat(path, follow_symlinks=False)
         fields = ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns")
         if any(getattr(before, key) != getattr(after, key) for key in fields):
             raise VaultError("The source file changed during the read: " + str(path))
+        reject_symlinks(path)
+        # Windows can return different time values for stat and fstat.
+        # Compare two file handles with the same metadata method.
+        current_descriptor = os.open(path, flags)
+        try:
+            current = os.fstat(current_descriptor)
+        finally:
+            os.close(current_descriptor)
         if any(getattr(before, key) != getattr(current, key) for key in fields):
             raise VaultError("The source path changed during the read: " + str(path))
 
