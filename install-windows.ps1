@@ -3,6 +3,8 @@
 param(
     [string]$InstallDir = (Join-Path $env:LOCALAPPDATA 'EvidenceVault'),
     [string]$SourceDirectory = '',
+    [ValidatePattern('^[\w.-]+/[\w.-]+$')]
+    [string]$SourceRepo = 'DezTheJackal/EvidenceVAULT',
     [ValidatePattern('^(main|[0-9a-fA-F]{40})$')]
     [string]$Revision = 'main',
     [switch]$SkipPythonInstall,
@@ -91,7 +93,7 @@ function Invoke-EvidenceVaultInstall {
         } else {
             Write-Host 'Download the complete EvidenceVault repository.'
             $archive = Join-Path $temporary 'source.zip'
-            Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/0xb0rn3/EvidenceVAULT/archive/$Revision.zip" -OutFile $archive
+            Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/$SourceRepo/archive/$Revision.zip" -OutFile $archive
             $expanded = Join-Path $temporary 'source'
             Expand-Archive -LiteralPath $archive -DestinationPath $expanded
             $folders = @(Get-ChildItem -LiteralPath $expanded -Directory)
