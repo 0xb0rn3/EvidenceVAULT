@@ -6,9 +6,14 @@ import argparse
 import io
 import json
 import struct
+import sys
 import zlib
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+
+if __package__ in (None, ""):
+    # Find the local package when this file starts directly.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from evidencevault.audit import load_run
 from evidencevault.cli import main
@@ -79,5 +84,13 @@ def build_demo(output: Path) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("-o", "--output", type=Path, required=True, help="New sample output folder.")
-    build_demo(parser.parse_args().output.absolute())
+    parser.add_argument("-o", "--output", type=Path, default=Path("demo_output"),
+                        help="New sample output folder. Default: ./demo_output.")
+    output = parser.parse_args().output.absolute()
+    try:
+        build_demo(output)
+    except FileExistsError:
+        parser.exit(2, "Error: The output folder already exists: " + str(output)
+                    + "\nUse -o with a new folder.\n")
+    except (OSError, RuntimeError) as error:
+        parser.exit(2, "Error: " + str(error) + "\n")

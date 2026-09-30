@@ -322,10 +322,26 @@ Read [the code guide](docs/CODE_GUIDE.md) for a module map and a school presenta
 Read [the contribution guide](CONTRIBUTING.md) for the code and writing rules.
 Read [the benchmark guide](benchmarks/README.md) for measured planning results and their limits.
 
-Create a complete dummy case and sample results for all ten operations:
+Create a complete dummy case and sample results for all ten operations.
+From the repository folder, run:
 
 ~~~bash
 python3 -m examples.build_demo -o ./demo_output
+~~~
+
+You can also start the script from the examples folder:
+
+~~~bash
+cd examples
+python3 build_demo.py
+~~~
+
+The script uses the local package. No separate package installation is required.
+Without -o, it creates demo_output in the current folder.
+Use -o with a new folder for another run:
+
+~~~bash
+python3 build_demo.py -o ./another_demo
 ~~~
 
 The output folder must be new.
@@ -350,6 +366,7 @@ The sample files and events are synthetic.
 - Added the Windows network installer and its CI check.
 - Added shared read buffers, parallel hash-name plans, and measured planning results.
 - Added a dummy case builder for all ten main operations.
+- Fixed direct demo startup and added a default sample output folder.
 
 ### 1.1.0
 

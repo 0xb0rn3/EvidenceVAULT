@@ -15,6 +15,7 @@ Each module has one main responsibility.
 | evidencevault/report.py | Convert a run result to safe HTML. |
 | evidencevault/report.css | Set the report layout and print style. |
 | tests/test_workflows.py | Check complete file operations with temporary data. |
+| tests/test_demo.py | Check demo startup and existing output protection. |
 | install-windows.ps1 | Install Python, the complete program, and its Windows command. |
 | examples/build_demo.py | Run each main operation with synthetic files. |
 | benchmarks/benchmark_io.py | Measure file plans and source reads with sample data. |
