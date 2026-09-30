@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.venv/
+case_output/
+restored_files/
+encoded_files/
+decoded_files/
+sorted_files/
+renamed_files/
+*.sqlite3
+*.sqlite3-journal
+*.vault.zip
+*.vault.json
